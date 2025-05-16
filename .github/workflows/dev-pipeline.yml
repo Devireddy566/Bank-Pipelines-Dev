@@ -1,0 +1,236 @@
+name: DEV CI Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Select the application to deploy'
+        required: true
+        type: choice
+        options:
+          - app-1
+          - app-2
+          - app-3
+          - app-4
+          - app-5
+          - app-6
+          - app-7
+          - app-8
+          - app-9
+          - app-10
+
+env:
+  # GCP Configuration
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+  GCR_REGISTRY: ${{ secrets.GCR_REGISTRY }}
+  
+  # SonarQube Configuration
+  SONAR_URL: ${{ secrets.SONAR_URL }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  
+  # Application Configuration
+  APP_NAME: ${{ inputs.app_name }}
+  APP_VERSION: ${{ github.sha }}
+  APP_REPO: ${{ format('org-name/{0}', inputs.app_name) }}
+  ENVIRONMENT: 'DEV'
+
+jobs:
+  checkout-app:
+    runs-on: self-hosted
+    runs-on-labels: Runner-1
+    steps:
+      - name: Checkout Pipeline Repository
+        uses: actions/checkout@v3
+        
+      - name: Checkout Application Repository
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.APP_REPO }}
+          path: ${{ env.APP_NAME }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
+      
+      - name: Upload App Source
+        uses: actions/upload-artifact@v3
+        with:
+          name: app-source
+          path: ${{ env.APP_NAME }}
+
+  security-check:
+    needs: checkout-app
+    runs-on: self-hosted
+    runs-on-labels: Runner-1
+    container: 
+      image: zricethezav/gitleaks
+    steps:
+      - name: Download App Source
+        uses: actions/download-artifact@v3
+        with:
+          name: app-source
+          path: .
+          
+      - name: Run Gitleaks
+        run: |
+          gitleaks detect -v --source . --report-path gitleaks-report.json
+      
+      - name: Upload Gitleaks Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+          retention-days: 7
+
+  build:
+    needs: security-check
+    runs-on: self-hosted
+    runs-on-labels: Runner-1
+    container:
+      image: maven:3.8-openjdk-17
+    steps:
+      - name: Download App Source
+        uses: actions/download-artifact@v3
+        with:
+          name: app-source
+          path: .
+          
+      - name: Set up Maven Cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ inputs.app_name }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-${{ inputs.app_name }}-
+            ${{ runner.os }}-maven-
+          
+      - name: Build with Maven
+        run: mvn clean package -DskipTests
+        working-directory: .
+        
+      - name: Upload JAR
+        uses: actions/upload-artifact@v3
+        with:
+          name: app-jar
+          path: target/*.jar
+          retention-days: 1
+  test:
+    needs: build
+    runs-on: self-hosted
+    runs-on-labels: Runner-1
+    container:
+      image: maven:3.8-openjdk-17
+    steps:
+      - name: Download App Source
+        uses: actions/download-artifact@v3
+        with:
+          name: app-source
+          path: .
+          
+      - name: Download JAR
+        uses: actions/download-artifact@v3
+        with:
+          name: app-jar
+          path: target
+          
+      - name: Set up Maven Cache
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ inputs.app_name }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-${{ inputs.app_name }}-
+            ${{ runner.os }}-maven-
+          
+      - name: Run Unit Tests
+        run: mvn test
+        
+      - name: SonarQube Analysis
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ env.APP_NAME }}
+            -Dsonar.projectName=${{ env.APP_NAME }}-DEV
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.java.binaries=target/
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
+            -Dsonar.junit.reportPaths=target/surefire-reports/
+            
+      - name: SonarQube Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        env:
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_URL }}
+        timeout-minutes: 5
+
+  scan-and-push:
+    needs: test
+    runs-on: self-hosted
+    runs-on-labels: Runner-1
+    environment: DEV
+    steps:
+      - name: Download App Source
+        uses: actions/download-artifact@v3
+        with:
+          name: app-source
+          path: .
+          
+      - name: Download JAR
+        uses: actions/download-artifact@v3
+        with:
+          name: app-jar
+          path: target
+      
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Clean Docker System
+        run: docker system prune -af --volumes
+      
+      - name: Build Docker Image
+        run: |
+          docker build -t ${{ env.APP_NAME }}:${{ env.APP_VERSION }} \
+            --build-arg ENV=${{ env.ENVIRONMENT }} \
+            --build-arg APP_NAME=${{ env.APP_NAME }} \
+            .
+      
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.APP_NAME }}:${{ env.APP_VERSION }}
+          format: 'json'
+          output: 'trivy-report.json'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+      
+      - name: Upload Trivy Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: trivy-report
+          path: trivy-report.json
+          retention-days: 7
+      
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ env.GCP_SERVICE_ACCOUNT }}
+      
+      - name: Configure Docker for GCR
+        run: |
+          echo ${{ env.GCP_SERVICE_ACCOUNT }} | docker login -u _json_key --password-stdin ${{ env.GCR_REGISTRY }}
+      
+      - name: Push to GCR
+        run: |
+          # Tag with app name, version and environment
+          docker tag ${{ env.APP_NAME }}:${{ env.APP_VERSION }} ${{ env.GCR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.APP_NAME }}/dev:${{ env.APP_VERSION }}
+          docker tag ${{ env.APP_NAME }}:${{ env.APP_VERSION }} ${{ env.GCR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.APP_NAME }}/dev:latest
+          
+          # Push both tags
+          docker push ${{ env.GCR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.APP_NAME }}/dev:${{ env.APP_VERSION }}
+          docker push ${{ env.GCR_REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.APP_NAME }}/dev:latest
+      
+      - name: Clean Docker System
+        if: always()
+        run: docker system prune -af --volumes

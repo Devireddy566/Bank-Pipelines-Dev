@@ -1,0 +1,136 @@
+name: Unit Testing Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Select test type'
+        type: choice
+        required: true
+        options:
+          - Unit Tests
+          - Unit Tests with Analysis
+        default: 'Unit Tests'
+
+env:
+  # SonarQube Configuration
+  SONAR_URL: ${{ secrets.SONAR_URL }}
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  # Application Configuration
+  APP_REPO: ${{ format('{0}/{1}', github.repository_owner, inputs.app_name) }}
+  DOCKER_CACHE: ${{ github.workspace }}/.docker-cache
+
+jobs:
+  unit-test:
+    name: Unit Testing
+    runs-on: self-hosted
+    steps:
+      - name: Checkout DevOps Pipeline
+        uses: actions/checkout@v3
+        with:
+          path: pipeline
+      
+      - name: Checkout Application Code
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ env.APP_REPO }}
+          ref: ${{ inputs.feature_branch }}
+          path: app
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          fetch-depth: 0
+      
+      - name: Secret Scan
+        if: inputs.run_type == 'Full Test (Unit Tests + Code Analysis)'
+        uses: gitleaks/gitleaks-action@v2
+        with:
+          path: ./app
+          config-path: ./pipeline/.gitleaks.toml
+          report-format: json
+          report-path: gitleaks-report.json
+          fail-on: high
+        continue-on-error: true
+      
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ inputs.app_name }}-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-m2-${{ inputs.app_name }}-
+            ${{ runner.os }}-m2-
+
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: Run Tests
+        working-directory: ./app
+        run: |
+          if [[ "${{ inputs.run_type }}" == "Quick Test (Unit Tests Only)" ]]; then
+            mvn test -B
+          else
+            mvn verify -B
+          fi
+          
+      - name: Run SonarQube Analysis
+        if: inputs.run_type == 'Full Test (Unit Tests + Code Analysis)'
+        working-directory: ./app
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mvn sonar:sonar \
+            -Dsonar.host.url=${{ env.SONAR_URL }} \
+            -Dsonar.login=${{ env.SONAR_TOKEN }} \
+            -Dsonar.projectKey=${{ inputs.app_name }}-${{ inputs.feature_branch }} \
+            -Dsonar.projectName="${{ inputs.app_name }} (${{ inputs.feature_branch }})" \
+            -Dsonar.qualitygate.wait=true \
+            -Dsonar.scm.provider=git \
+            -Dsonar.java.binaries=target/ \
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+            -Dsonar.junit.reportPaths=target/surefire-reports/
+
+      - name: Generate Test Report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Test Results
+          path: app/target/surefire-reports/*.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-reports-${{ inputs.app_name }}-${{ github.run_number }}
+          path: |
+            app/target/surefire-reports/
+            app/target/site/jacoco/
+            gitleaks-report.json
+          retention-days: 5
+
+      - name: Publish Summary
+        if: always()
+        run: |
+          echo "### 🧪 Test Results for ${{ inputs.app_name }} - ${{ inputs.feature_branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Test Results Summary
+          if [ -d "app/target/surefire-reports" ]; then
+            TOTAL=$(find app/target/surefire-reports -name "TEST-*.xml" | wc -l)
+            FAILED=$(grep -l "<failure" app/target/surefire-reports/TEST-*.xml 2>/dev/null | wc -l)
+            SUCCESS=$((TOTAL - FAILED))
+            
+            echo "#### Unit Test Summary" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Passed: $SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "❌ Failed: $FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "📊 Total: $TOTAL" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Code Analysis Links
+          if [[ "${{ inputs.run_type }}" == "Full Test (Unit Tests + Code Analysis)" ]]; then
+            echo "### 🔍 Code Analysis" >> $GITHUB_STEP_SUMMARY
+            echo "- [View SonarQube Results](${{ env.SONAR_URL }}/dashboard?id=${{ inputs.app_name }}-${{ inputs.feature_branch }})" >> $GITHUB_STEP_SUMMARY
+          fi
