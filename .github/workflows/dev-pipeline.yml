@@ -8,16 +8,16 @@ on:
         required: true
         type: choice
         options:
-          - app-1
-          - app-2
-          - app-3
-          - app-4
-          - app-5
-          - app-6
-          - app-7
-          - app-8
-          - app-9
-          - app-10
+          - Pk-App-1
+          - Pk-App-2
+          - Pk-App-3
+          - Pk-App-4
+          - Pk-App-5
+          - Pk-App-6
+          - Pk-App-7
+          - Pk-App-8
+          - Pk-App-9
+          - Pk-App-10
 
 env:
   # GCP Configuration
