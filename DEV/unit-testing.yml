@@ -12,20 +12,12 @@ on:
           - Unit Tests with Analysis
         default: 'Unit Tests'
 
-  # Also trigger on pull request events
-  pull_request:
-    types: [opened, synchronize, reopened]
-    branches-ignore:
-      - main   # Prevent running on main branch directly
-
 env:
   # SonarQube Configuration
   SONAR_URL: ${{ secrets.SONAR_URL }}
   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-  # Branch Configuration
-  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
   # Application Configuration
-  APP_REPO: ${{ github.repository }}
+  APP_REPO: ${{ format('{0}/{1}', github.repository_owner, inputs.app_name) }}
   DOCKER_CACHE: ${{ github.workspace }}/.docker-cache
 
 jobs:
