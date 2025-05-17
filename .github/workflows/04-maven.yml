@@ -1,0 +1,19 @@
+name: '04-Maven'
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: pkrunner1
+    container:
+      image: maven:3.8-openjdk-17
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: source-code
+      - name: Build
+        run: mvn clean package
+      - uses: actions/upload-artifact@v3
+        with:
+          name: app-jar
+          path: target/*.jar

@@ -1,0 +1,20 @@
+name: '03-SonarQube'
+on:
+  workflow_call:
+    secrets:
+      sonar_token:
+        required: true
+      sonar_url:
+        required: true
+
+jobs:
+  quality:
+    runs-on: pkrunner1
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: source-code
+      - uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.sonar_token }}
+          SONAR_HOST_URL: ${{ secrets.sonar_url }}

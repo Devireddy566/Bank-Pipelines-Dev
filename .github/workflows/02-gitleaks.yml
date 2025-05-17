@@ -1,0 +1,15 @@
+name: '02-Gitleaks'
+on:
+  workflow_call:
+
+jobs:
+  security:
+    runs-on: pkrunner1
+    container: 
+      image: zricethezav/gitleaks:latest
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: source-code
+      - name: Run Gitleaks
+        run: gitleaks detect -v --source . --report-path gitleaks-report.json

@@ -1,0 +1,26 @@
+name: '06-Security'
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+
+jobs:
+  scan:
+    runs-on: pkrunner1
+    container:
+      image: aquasec/trivy:latest
+    steps:
+      - name: Scan Image
+        run: |
+          trivy image --format json \
+            --output scan.json \
+            ${{ inputs.image_name }}:${{ inputs.tag }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: security-scan
+          path: scan.json

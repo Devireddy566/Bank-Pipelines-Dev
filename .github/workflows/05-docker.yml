@@ -1,0 +1,30 @@
+name: '05-Docker'
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+    secrets:
+      gcr_registry:
+        required: true
+      gcp_credentials:
+        required: true
+
+jobs:
+  package:
+    runs-on: pkrunner1
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: app-jar
+      - uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.gcp_credentials }}
+      - name: Build and Push
+        run: |
+          docker build -t ${{ inputs.image_name }}:${{ inputs.tag }} .
+          docker push ${{ secrets.gcr_registry }}/${{ inputs.image_name }}:${{ inputs.tag }}

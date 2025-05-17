@@ -1,0 +1,29 @@
+name: '01-Checkout'
+on:
+  workflow_call:
+    inputs:
+      repo:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+    secrets:
+      token:
+        required: true
+
+jobs:
+  checkout:
+    runs-on: pkrunner1
+    steps:
+      - uses: actions/checkout@v3
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.token }}
+      - uses: actions/upload-artifact@v3
+        with:
+          name: source-code
+          path: .
