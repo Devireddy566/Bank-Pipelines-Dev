@@ -1,0 +1,55 @@
+name: 'Dev - Pipeline'
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Select application'
+        required: true
+        type: choice
+        options: [Pk-App-1, Pk-App-2, Pk-App-3, Pk-App-4, Pk-App-5]
+      tag_version:
+        description: 'Tag version'
+        required: true
+        type: string
+
+jobs:
+  checkout:
+    uses: ./.github/workflows/steps/01-checkout.yml
+    with:
+      repo: ${{ github.repository }}
+      ref: ${{ inputs.tag_version }}
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
+
+  security:
+    needs: checkout
+    uses: ./.github/workflows/steps/02-gitleaks.yml
+
+  quality:
+    needs: security
+    uses: ./.github/workflows/steps/03-sonar.yml
+    secrets:
+      sonar_token: ${{ secrets.SONAR_TOKEN }}
+      sonar_url: ${{ secrets.SONAR_URL }}
+
+  build:
+    needs: quality
+    uses: ./.github/workflows/steps/04-maven.yml
+
+  package:
+    needs: build
+    uses: ./.github/workflows/steps/05-docker.yml
+    with:
+      image_name: ${{ inputs.app_name }}
+      tag: ${{ inputs.tag_version }}
+    secrets:
+      gcr_registry: ${{ secrets.GCR_REGISTRY }}
+      gcp_credentials: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+  scan:
+    needs: package
+    uses: ./.github/workflows/steps/06-security.yml
+    with:
+      image_name: ${{ inputs.app_name }}
+      tag: ${{ inputs.tag_version }}
