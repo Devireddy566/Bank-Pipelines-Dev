@@ -1,0 +1,29 @@
+# Development Environment Configuration
+environment: dev
+gcp:
+  project_id: ${{ secrets.GCP_PROJECT_ID }}
+  registry: ${{ secrets.GCR_REGISTRY }}
+  service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+  jar_repo: pk-jars-dev
+  scan_bucket: Trivyscanedev
+
+sonarqube:
+  url: ${{ secrets.SONAR_URL }}
+  token: ${{ secrets.SONAR_TOKEN }}
+
+containers:
+  gitleaks:
+    image: zricethezav/gitleaks:latest
+  maven:
+    image: maven:3.8-openjdk-17
+    cache_dir: ~/.m2/repository
+  trivy:
+    image: aquasec/trivy:latest
+
+# Only need docker socket for image operations
+volumes:
+  docker:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - /var/run/docker.sock:/var/run/docker.sock
+  maven:
+    - ~/.m2:/root/.m2

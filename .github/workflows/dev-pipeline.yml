@@ -1,4 +1,4 @@
-name: DEV CI Pipeline
+name: DEV Pipeline Trigger
 
 on:
   workflow_dispatch:
@@ -7,19 +7,19 @@ on:
         description: 'Select the application to deploy'
         required: true
         type: choice
-        options:
-          - Pk-App-1
-          - Pk-App-2
-          - Pk-App-3
-          - Pk-App-4
-          - Pk-App-5
-          - Pk-App-6
-          - Pk-App-7
-          - Pk-App-8
-          - Pk-App-9
-          - Pk-App-10
+        options: [Pk-App-1, Pk-App-2, Pk-App-3, Pk-App-4, Pk-App-5]
       tag_version:
-        description: 'Select the tag version to deploy'
+        description: 'Tag version'
+        required: true
+        type: string
+
+jobs:
+  trigger-dev-pipeline:
+    uses: ./.github/workflows/../../DEV/pipeline.yml
+    with:
+      app_name: ${{ inputs.app_name }}
+      tag_version: ${{ inputs.tag_version }}
+    secrets: inherit
         required: true
         type: string
 
@@ -64,14 +64,19 @@ jobs:
     runs-on: [self-hosted, Runner-1]
     container: 
       image: zricethezav/gitleaks
+      volumes:
+        - ${{ github.workspace }}:/workspace
+        - /var/run/docker.sock:/var/run/docker.sock
+      options: --user root --privileged
     steps:
       - name: Download App Source
         uses: actions/download-artifact@v3
         with:
           name: app-source
-          path: .
+          path: /workspace
           
       - name: Run Gitleaks
+        working-directory: /workspace
         run: |
           gitleaks detect -v --source . --report-path gitleaks-report.json
       
@@ -86,6 +91,10 @@ jobs:
     runs-on: [self-hosted, Runner-1]
     container:
       image: maven:3.8-openjdk-17
+      volumes:
+        - ${{ github.workspace }}:/workspace
+        - ~/.m2:/root/.m2
+      options: --user root
     steps:
       - name: Download App Source
         uses: actions/download-artifact@v3
@@ -103,8 +112,9 @@ jobs:
             ${{ runner.os }}-maven-
           
       - name: Build with Maven
-        run: mvn clean package -DskipTests
-        working-directory: .
+        working-directory: /workspace
+        run: |
+          mvn -Dmaven.repo.local=/root/.m2/repository clean package -DskipTests
         
       - name: Upload JAR
         uses: actions/upload-artifact@v3
@@ -118,6 +128,10 @@ jobs:
     runs-on: [self-hosted, Runner-1]
     container:
       image: maven:3.8-openjdk-17
+      volumes:
+        - ${{ github.workspace }}:/workspace
+        - ~/.m2:/root/.m2
+      options: --user root
     steps:
       - name: Download App Source
         uses: actions/download-artifact@v3
@@ -166,6 +180,12 @@ jobs:
   scan-and-push:
     needs: test
     runs-on: [self-hosted, Runner-1]
+    container:
+      image: aquasec/trivy:latest
+      volumes:
+        - ${{ github.workspace }}:/workspace
+        - /var/run/docker.sock:/var/run/docker.sock
+      options: --user root --privileged
     environment: dev
     steps:
       - name: Download App Source
@@ -194,14 +214,14 @@ jobs:
             .
       
       - name: Scan with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.APP_NAME }}:${{ env.APP_VERSION }}
-          format: 'json'
-          output: 'trivy-report.json'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
+        run: |
+          trivy image --cache-dir /workspace/.trivycache/ \
+            --format json \
+            --output trivy-report.json \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            ${{ env.APP_NAME }}:${{ env.APP_VERSION }}
       
       - name: Upload Trivy Report
         uses: actions/upload-artifact@v3
