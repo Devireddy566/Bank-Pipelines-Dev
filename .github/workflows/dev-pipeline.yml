@@ -233,7 +233,8 @@ jobs:
         if: always()
         run: docker system prune -af --volumes
 
-  notify:    needs: scan-and-push
+  notify:
+    needs: scan-and-push
     runs-on: [self-hosted, Runner-1]
     if: always()
     steps:
