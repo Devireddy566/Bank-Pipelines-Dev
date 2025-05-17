@@ -20,7 +20,7 @@ on:
 
 jobs:
   checkout:
-    uses: ./.github/workflows/01-checkout.yml
+    uses: ./.github/workflows/steps/01-checkout.yml
     with:
       repo: ${{ github.repository }}
       ref: ${{ inputs.tag_version }}
@@ -29,22 +29,22 @@ jobs:
 
   security:
     needs: checkout
-    uses: ./.github/workflows/02-gitleaks.yml
+    uses: ./.github/workflows/steps/02-gitleaks.yml
 
   quality:
     needs: security
-    uses: ./.github/workflows/03-sonar.yml
+    uses: ./.github/workflows/steps/03-sonar.yml
     secrets:
       sonar_token: ${{ secrets.SONAR_TOKEN }}
       sonar_url: ${{ secrets.SONAR_URL }}
 
   build:
     needs: quality
-    uses: ./.github/workflows/04-maven.yml
+    uses: ./.github/workflows/steps/04-maven.yml
 
   package:
     needs: build
-    uses: ./.github/workflows/05-docker.yml
+    uses: ./.github/workflows/steps/05-docker.yml
     with:
       image_name: ${{ inputs.app_name }}
       tag: ${{ inputs.tag_version }}
@@ -54,7 +54,7 @@ jobs:
 
   scan:
     needs: package
-    uses: ./.github/workflows/06-security.yml
+    uses: ./.github/workflows/steps/06-security.yml
     with:
       image_name: ${{ inputs.app_name }}
       tag: ${{ inputs.tag_version }}
