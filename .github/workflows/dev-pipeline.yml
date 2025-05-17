@@ -18,6 +18,10 @@ on:
           - Pk-App-8
           - Pk-App-9
           - Pk-App-10
+      tag_version:
+        description: 'Select the tag version to deploy'
+        required: true
+        type: string
 
 env:
   # GCP Configuration
@@ -31,14 +35,13 @@ env:
   
   # Application Configuration
   APP_NAME: ${{ inputs.app_name }}
-  APP_VERSION: ${{ github.sha }}
+  APP_VERSION: ${{ inputs.tag_version }}
   APP_REPO: ${{ format('org-name/{0}', inputs.app_name) }}
   ENVIRONMENT: 'DEV'
 
 jobs:
   checkout-app:
-    runs-on: self-hosted
-    runs-on-labels: Runner-1
+    runs-on: [self-hosted, Runner-1]
     steps:
       - name: Checkout Pipeline Repository
         uses: actions/checkout@v3
@@ -48,6 +51,7 @@ jobs:
         with:
           repository: ${{ env.APP_REPO }}
           path: ${{ env.APP_NAME }}
+          ref: ${{ inputs.tag_version }}
           token: ${{ secrets.APP_REPO_TOKEN }}
       
       - name: Upload App Source
@@ -55,11 +59,9 @@ jobs:
         with:
           name: app-source
           path: ${{ env.APP_NAME }}
-
   security-check:
     needs: checkout-app
-    runs-on: self-hosted
-    runs-on-labels: Runner-1
+    runs-on: [self-hosted, Runner-1]
     container: 
       image: zricethezav/gitleaks
     steps:
@@ -79,11 +81,9 @@ jobs:
           name: gitleaks-report
           path: gitleaks-report.json
           retention-days: 7
-
   build:
     needs: security-check
-    runs-on: self-hosted
-    runs-on-labels: Runner-1
+    runs-on: [self-hosted, Runner-1]
     container:
       image: maven:3.8-openjdk-17
     steps:
@@ -111,11 +111,9 @@ jobs:
         with:
           name: app-jar
           path: target/*.jar
-          retention-days: 1
-  test:
+          retention-days: 1  test:
     needs: build
-    runs-on: self-hosted
-    runs-on-labels: Runner-1
+    runs-on: [self-hosted, Runner-1]
     container:
       image: maven:3.8-openjdk-17
     steps:
@@ -163,12 +161,10 @@ jobs:
           SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ env.SONAR_URL }}
         timeout-minutes: 5
-
   scan-and-push:
     needs: test
-    runs-on: self-hosted
-    runs-on-labels: Runner-1
-    environment: DEV
+    runs-on: [self-hosted, Runner-1]
+    environment: dev
     steps:
       - name: Download App Source
         uses: actions/download-artifact@v3
